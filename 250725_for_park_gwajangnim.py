@@ -8,13 +8,15 @@ st.title("📊 Sales Data EDA Dashboard")
 st.sidebar.header("1. Upload Sales CSV File")
 uploaded_file = st.sidebar.file_uploader("Upload your CSV", type=["csv"])
 
-# Column index mapping (fixed based on column order you provided)
+# Column index mapping based on provided order
 COL_IDX = {
-    "ORDERDATE": 5,
-    "SALES": 4,
-    "PRODUCTLINE": 10,
-    "PRICEEACH": 2,
+    "ORDERNUMBER": 0,
     "QUANTITYORDERED": 1,
+    "PRICEEACH": 2,
+    "ORDERLINENUMBER": 3,
+    "SALES": 4,
+    "ORDERDATE": 5,
+    "PRODUCTLINE": 10,
 }
 
 def load_csv_with_fallback(file):
@@ -37,19 +39,25 @@ if uploaded_file:
     # Drop fully empty rows
     df.dropna(how='all', inplace=True)
 
-    # Handle date parsing
-    try:
-        df.iloc[:, COL_IDX["ORDERDATE"]] = pd.to_datetime(df.iloc[:, COL_IDX["ORDERDATE"]], errors='coerce')
-    except:
-        st.warning("⚠️ Failed to parse ORDERDATE column.")
+    # Check if the DataFrame has enough columns
+    if df.shape[1] <= max(COL_IDX.values()):
+        st.error("❌ The uploaded file does not contain all required columns.")
+        st.stop()
 
-    # Handle missing values: numeric = 0, object = "Unknown"
+    # Convert ORDERDATE (index 5) to datetime
+    try:
+        orderdate_col = df.columns[COL_IDX["ORDERDATE"]]
+        df[orderdate_col] = pd.to_datetime(df[orderdate_col], errors='coerce')
+    except Exception as e:
+        st.warning(f"⚠️ Failed to convert ORDERDATE: {e}")
+
+    # Fill missing values
     num_cols = df.select_dtypes(include='number').columns
     obj_cols = df.select_dtypes(include='object').columns
     df[num_cols] = df[num_cols].fillna(0)
     df[obj_cols] = df[obj_cols].fillna("Unknown")
 
-    # Show missing summary
+    # Missing value report
     with st.expander("🩹 Missing Values Summary"):
         missing = df.isnull().sum()
         missing = missing[missing > 0]
@@ -58,10 +66,12 @@ if uploaded_file:
         else:
             st.write("✅ No missing values detected (after handling).")
 
-    # ===== Trend Over Time =====
+    # ===== Sales Trend Over Time =====
     st.subheader("📈 Sales Trend Over Time")
     try:
-        time_df = df.iloc[:, [COL_IDX["ORDERDATE"], COL_IDX["SALES"]]].dropna().sort_values(df.columns[COL_IDX["ORDERDATE"]])
+        sales_col = df.columns[COL_IDX["SALES"]]
+        date_col = df.columns[COL_IDX["ORDERDATE"]]
+        time_df = df[[date_col, sales_col]].dropna().sort_values(date_col)
         time_df.columns = ['ORDERDATE', 'SALES']
         fig_time = px.line(time_df, x='ORDERDATE', y='SALES', title="Sales Over Time")
         st.plotly_chart(fig_time, use_container_width=True)
@@ -71,18 +81,24 @@ if uploaded_file:
     # ===== Sales by Product Line =====
     st.subheader("📊 Sales by Product Line")
     try:
-        product_df = df.iloc[:, [COL_IDX["PRODUCTLINE"], COL_IDX["SALES"]]].copy()
-        product_df.columns = ['PRODUCTLINE', 'SALES']
-        grouped = product_df.groupby('PRODUCTLINE')['SALES'].sum().reset_index()
+        prod_col = df.columns[COL_IDX["PRODUCTLINE"]]
+        sales_col = df.columns[COL_IDX["SALES"]]
+        prod_df = df[[prod_col, sales_col]].copy()
+        prod_df.columns = ['PRODUCTLINE', 'SALES']
+        grouped = prod_df.groupby('PRODUCTLINE')['SALES'].sum().reset_index()
         fig_bar = px.bar(grouped, x='PRODUCTLINE', y='SALES', title="Total Sales by Product Line")
         st.plotly_chart(fig_bar, use_container_width=True)
     except Exception as e:
         st.info(f"Could not plot Product Line Sales: {e}")
 
-    # ===== Scatter Plot =====
+    # ===== Price vs Quantity Scatter =====
     st.subheader("🧭 Price vs Quantity")
     try:
-        scatter_df = df.iloc[:, [COL_IDX["QUANTITYORDERED"], COL_IDX["PRICEEACH"], COL_IDX["SALES"], COL_IDX["PRODUCTLINE"]]].copy()
+        qty_col = df.columns[COL_IDX["QUANTITYORDERED"]]
+        price_col = df.columns[COL_IDX["PRICEEACH"]]
+        sales_col = df.columns[COL_IDX["SALES"]]
+        prod_col = df.columns[COL_IDX["PRODUCTLINE"]]
+        scatter_df = df[[qty_col, price_col, sales_col, prod_col]].copy()
         scatter_df.columns = ['QUANTITYORDERED', 'PRICEEACH', 'SALES', 'PRODUCTLINE']
         fig_scatter = px.scatter(
             scatter_df,
@@ -96,7 +112,7 @@ if uploaded_file:
     except Exception as e:
         st.info(f"Could not plot Price vs Quantity: {e}")
 
-    # ===== Summary Stats =====
+    # ===== Summary Statistics =====
     with st.expander("📋 Summary Statistics"):
         if not df.select_dtypes(include='number').empty:
             st.write("**📐 Numeric Summary**")
@@ -105,7 +121,7 @@ if uploaded_file:
             st.write("**🏷️ Categorical Summary**")
             st.dataframe(df.describe(include='object').T)
 
-    # ===== Raw Data View =====
+    # ===== Raw Data Table =====
     with st.expander("🧾 Raw Data Table"):
         st.dataframe(df)
 
