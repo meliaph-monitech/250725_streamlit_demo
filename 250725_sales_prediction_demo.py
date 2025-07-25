@@ -1,87 +1,109 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import numpy as np
+import plotly.graph_objects as go
+
 from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 
-# Title
-st.title("📈 Yearly Sales Prediction App")
+# App title
+st.title("📊 CSV-Based Sales Forecast App with ML Models")
 
-# Session state to store input data
-if 'data' not in st.session_state:
-    st.session_state.data = []
+# Upload CSV file
+uploaded_file = st.file_uploader("📁 Upload your CSV file with 'year' and 'sales' columns", type=['csv'])
 
-# Input form
-with st.form("input_form", clear_on_submit=True):
-    year = st.number_input("Enter Year", min_value=1900, max_value=2100, step=1)
-    sales = st.number_input("Enter Sales ($)", min_value=0.0, format="%.2f")
-    submitted = st.form_submit_button("Add Data")
-    if submitted:
-        st.session_state.data.append({"year": year, "sales": sales})
+if uploaded_file is not None:
+    # Load CSV
+    df = pd.read_csv(uploaded_file)
 
-# Show current input
-if st.session_state.data:
-    df = pd.DataFrame(st.session_state.data).sort_values("year")
-    st.write("### Current Input Data")
-    st.dataframe(df)
+    # Drop the index column if it's present (e.g. "Unnamed: 0")
+    if df.columns[0].lower().startswith('unnamed'):
+        df = df.drop(columns=[df.columns[0]])
 
-    # Plot the raw data
-    fig_raw = go.Figure()
-    fig_raw.add_trace(go.Scatter(x=df['year'], y=df['sales'], mode='lines+markers', name='Actual Sales'))
-    fig_raw.update_layout(title="Sales Over Years", xaxis_title="Year", yaxis_title="Sales ($)")
-    st.plotly_chart(fig_raw, use_container_width=True)
+    # Validate columns
+    required_columns = {'year', 'sales'}
+    if not required_columns.issubset(df.columns):
+        st.error(f"CSV must contain the following columns: {required_columns}")
+    else:
+        # Sort by year
+        df = df[['year', 'sales']].dropna()
+        df = df.sort_values("year").reset_index(drop=True)
 
-    if st.button("✅ Finish Input Data & Run Prediction"):
-        # Prepare features
+        # Display raw data
+        st.write("### ✅ Input Data")
+        st.dataframe(df)
+
+        # Plot actual input data
+        fig_input = go.Figure()
+        fig_input.add_trace(go.Scatter(
+            x=df['year'], y=df['sales'],
+            mode='lines+markers', name='Actual Sales'
+        ))
+        fig_input.update_layout(
+            title="📈 Input Sales Data",
+            xaxis_title="Year",
+            yaxis_title="Sales ($)"
+        )
+        st.plotly_chart(fig_input, use_container_width=True)
+
+        # Prepare data
         X = df[['year']]
         y = df['sales']
 
-        # Generate future years (next 3 years)
+        # Predict next 3 years
         last_year = df['year'].max()
         future_years = pd.DataFrame({'year': np.arange(last_year + 1, last_year + 4)})
 
-        # Machine learning models
+        st.subheader("🔮 3-Year Sales Forecast from Multiple Models")
+
+        # Define and configure models with better parameters
         models = {
             "Linear Regression": LinearRegression(),
-            "Decision Tree": DecisionTreeRegressor(),
-            "Random Forest": RandomForestRegressor(),
-            "Gradient Boosting": GradientBoostingRegressor(),
-            "Support Vector Regressor": SVR()
+            "Decision Tree Regressor": DecisionTreeRegressor(max_depth=5, min_samples_split=4, random_state=42),
+            "Random Forest Regressor": RandomForestRegressor(n_estimators=200, max_depth=6, random_state=42),
+            "Gradient Boosting Regressor": GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=4, random_state=42),
+            "Support Vector Regressor (SVR)": make_pipeline(StandardScaler(), SVR(C=100, epsilon=0.1, kernel='rbf'))
         }
 
+        # Loop through models and display predictions
         for name, model in models.items():
+            # Train
             model.fit(X, y)
+
+            # Predictions
             pred_existing = model.predict(X)
             pred_future = model.predict(future_years)
 
-            # Combine data for plotting
+            # Combine actual + prediction
             plot_years = pd.concat([X, future_years])
             plot_sales = np.concatenate([pred_existing, pred_future])
             labels = ['Historical'] * len(X) + ['Prediction'] * len(future_years)
 
-            plot_df = pd.DataFrame({
-                'Year': plot_years['year'],
-                'Sales': plot_sales,
-                'Type': labels
-            })
-
-            # Plot
+            # Plotly chart
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=plot_df[plot_df['Type']=='Historical']['Year'],
-                                     y=plot_df[plot_df['Type']=='Historical']['Sales'],
-                                     mode='lines+markers',
-                                     name='Historical'))
-            fig.add_trace(go.Scatter(x=plot_df[plot_df['Type']=='Prediction']['Year'],
-                                     y=plot_df[plot_df['Type']=='Prediction']['Sales'],
-                                     mode='lines+markers',
-                                     name='Prediction',
-                                     line=dict(dash='dash')))
-            fig.update_layout(title=f"{name} - Sales Forecast",
-                              xaxis_title="Year", yaxis_title="Sales ($)")
+            fig.add_trace(go.Scatter(
+                x=plot_years['year'][:len(X)],
+                y=plot_sales[:len(X)],
+                mode='lines+markers',
+                name='Historical'
+            ))
+            fig.add_trace(go.Scatter(
+                x=plot_years['year'][len(X):],
+                y=plot_sales[len(X):],
+                mode='lines+markers',
+                name='Prediction',
+                line=dict(dash='dash')
+            ))
+            fig.update_layout(
+                title=f"{name} - Sales Forecast",
+                xaxis_title="Year",
+                yaxis_title="Sales ($)"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Please start inputting data (Year and Sales).")
+    st.info("Please upload a CSV file to begin.")
