@@ -9,26 +9,32 @@ st.title("📊 Interactive CSV Data EDA Dashboard")
 st.sidebar.header("1. Upload CSV File")
 uploaded_file = st.sidebar.file_uploader("Upload your CSV", type=["csv"])
 
-# Sidebar – Encoding Option
-st.sidebar.header("2. File Encoding")
-encoding = st.sidebar.selectbox("Choose file encoding", ["utf-8", "latin1", "ISO-8859-1", "cp1252"], index=0)
+def load_csv_with_fallback(file):
+    """Try reading CSV with several encodings."""
+    encodings_to_try = ['utf-8', 'latin1', 'ISO-8859-1', 'cp1252']
+    for enc in encodings_to_try:
+        try:
+            return pd.read_csv(file, encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeDecodeError("All encoding attempts failed. Please try saving your CSV as UTF-8.")
 
 if uploaded_file:
     try:
-        df = pd.read_csv(uploaded_file, encoding=encoding)
+        df = load_csv_with_fallback(uploaded_file)
         st.success("✅ File uploaded and data loaded successfully!")
     except Exception as e:
         st.error(f"❌ Error reading CSV file: {e}")
         st.stop()
 
-    st.sidebar.header("3. Column Filters")
+    st.sidebar.header("2. Column Filters")
 
     # Detect column types
     num_cols = df.select_dtypes(include="number").columns.tolist()
     cat_cols = df.select_dtypes(include="object").columns.tolist()
     date_cols = df.select_dtypes(include=["datetime64", "datetime"]).columns.tolist()
 
-    # Try converting object columns to datetime
+    # Try parsing object columns as datetime
     for col in df.columns:
         if col not in date_cols:
             try:
