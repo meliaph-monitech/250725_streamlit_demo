@@ -27,29 +27,33 @@ if uploaded_file:
         st.error(f"❌ Failed to read CSV file: {e}")
         st.stop()
 
-    # Normalize column names for easier access
+    # Normalize column names to uppercase
     df.columns = df.columns.str.upper()
 
-    # Drop completely empty rows
+    # Drop rows that are completely empty
     df.dropna(how='all', inplace=True)
 
-    # Fill missing numeric values with 0 (or you can impute with mean)
-    num_cols = df.select_dtypes(include='number').columns
-    df[num_cols] = df[num_cols].fillna(0)
-
-    # Convert ORDERDATE to datetime
+    # Try to convert ORDERDATE to datetime
     if 'ORDERDATE' in df.columns:
-        try:
-            df['ORDERDATE'] = pd.to_datetime(df['ORDERDATE'], errors='coerce')
-        except:
-            st.warning("⚠️ Failed to convert ORDERDATE to datetime.")
+        df['ORDERDATE'] = pd.to_datetime(df['ORDERDATE'], errors='coerce')
 
-    # Recompute columns after cleaning
+    # Handle missing values: fill numeric with 0, categorical with "Unknown"
     num_cols = df.select_dtypes(include='number').columns.tolist()
     cat_cols = df.select_dtypes(include='object').columns.tolist()
-    date_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
 
-    # ===== Trend Over Time (e.g., SALES over ORDERDATE) =====
+    df[num_cols] = df[num_cols].fillna(0)
+    df[cat_cols] = df[cat_cols].fillna("Unknown")
+
+    # Show missing data summary
+    with st.expander("🩹 Missing Values Summary"):
+        missing = df.isnull().sum()
+        missing = missing[missing > 0]
+        if not missing.empty:
+            st.dataframe(missing.to_frame(name="Missing Values"))
+        else:
+            st.write("✅ No missing values detected (after handling).")
+
+    # ===== Sales Trend Over Time =====
     st.subheader("📈 Sales Trend Over Time")
     if 'ORDERDATE' in df.columns and 'SALES' in df.columns:
         time_df = df[['ORDERDATE', 'SALES']].dropna().sort_values('ORDERDATE')
@@ -58,8 +62,8 @@ if uploaded_file:
     else:
         st.info("ORDERDATE or SALES column missing for time trend plot.")
 
-    # ===== Bar Chart (e.g., SALES by PRODUCTLINE) =====
-    st.subheader("📊 Sales by Category")
+    # ===== Sales by Product Line =====
+    st.subheader("📊 Sales by Product Line")
     if 'PRODUCTLINE' in df.columns and 'SALES' in df.columns:
         cat_df = df.groupby('PRODUCTLINE')['SALES'].sum().reset_index()
         fig_bar = px.bar(cat_df, x='PRODUCTLINE', y='SALES', title="Total Sales by Product Line")
@@ -67,13 +71,17 @@ if uploaded_file:
     else:
         st.info("PRODUCTLINE or SALES column missing for bar chart.")
 
-    # ===== Scatter Plot (e.g., PRICEEACH vs QUANTITYORDERED) =====
+    # ===== Price vs Quantity Ordered =====
     st.subheader("🧭 Price vs Quantity")
     if 'PRICEEACH' in df.columns and 'QUANTITYORDERED' in df.columns:
-        fig_scatter = px.scatter(df, x='QUANTITYORDERED', y='PRICEEACH',
-                                 size='SALES' if 'SALES' in df.columns else None,
-                                 color='PRODUCTLINE' if 'PRODUCTLINE' in df.columns else None,
-                                 title="Price vs Quantity Ordered")
+        fig_scatter = px.scatter(
+            df,
+            x='QUANTITYORDERED',
+            y='PRICEEACH',
+            size='SALES' if 'SALES' in df.columns else None,
+            color='PRODUCTLINE' if 'PRODUCTLINE' in df.columns else None,
+            title="Price vs Quantity Ordered"
+        )
         st.plotly_chart(fig_scatter, use_container_width=True)
     else:
         st.info("PRICEEACH or QUANTITYORDERED column missing for scatter plot.")
@@ -81,12 +89,12 @@ if uploaded_file:
     # ===== Summary Statistics =====
     with st.expander("📋 Summary Statistics"):
         if num_cols:
-            st.write("**Numeric Summary**")
-            st.dataframe(df[num_cols].describe())
+            st.write("**📐 Numeric Summary**")
+            st.dataframe(df[num_cols].describe().T)
         else:
             st.info("No numeric columns available.")
         if cat_cols:
-            st.write("**Categorical Summary**")
+            st.write("**🏷️ Categorical Summary**")
             st.dataframe(df[cat_cols].describe(include='object').T)
         else:
             st.info("No categorical columns available.")
