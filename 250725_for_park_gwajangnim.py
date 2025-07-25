@@ -9,7 +9,7 @@ st.title("📊 Sales Data EDA Dashboard")
 st.sidebar.header("1. Upload Sales CSV File")
 uploaded_file = st.sidebar.file_uploader("Upload your CSV", type=["csv"])
 
-# Encoding fallback
+# Encoding fallback loader
 def load_csv_with_fallback(file):
     encodings = ['utf-8', 'latin1', 'ISO-8859-1', 'cp1252']
     for enc in encodings:
@@ -27,14 +27,24 @@ if uploaded_file:
         st.error(f"❌ Failed to read CSV file: {e}")
         st.stop()
 
+    # Normalize column names for easier access
+    df.columns = df.columns.str.upper()
+
+    # Drop completely empty rows
+    df.dropna(how='all', inplace=True)
+
+    # Fill missing numeric values with 0 (or you can impute with mean)
+    num_cols = df.select_dtypes(include='number').columns
+    df[num_cols] = df[num_cols].fillna(0)
+
     # Convert ORDERDATE to datetime
     if 'ORDERDATE' in df.columns:
         try:
-            df['ORDERDATE'] = pd.to_datetime(df['ORDERDATE'])
+            df['ORDERDATE'] = pd.to_datetime(df['ORDERDATE'], errors='coerce')
         except:
-            pass
+            st.warning("⚠️ Failed to convert ORDERDATE to datetime.")
 
-    # Detect columns
+    # Recompute columns after cleaning
     num_cols = df.select_dtypes(include='number').columns.tolist()
     cat_cols = df.select_dtypes(include='object').columns.tolist()
     date_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
