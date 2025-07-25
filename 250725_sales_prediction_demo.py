@@ -1,129 +1,87 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.svm import SVR
 
-st.set_page_config(page_title="Sales EDA Dashboard", layout="wide")
-st.title("📊 Sales Data EDA Dashboard")
+# Title
+st.title("📈 Yearly Sales Prediction App")
 
-st.sidebar.header("1. Upload Sales CSV File")
-uploaded_file = st.sidebar.file_uploader("Upload your CSV", type=["csv"])
+# Session state to store input data
+if 'data' not in st.session_state:
+    st.session_state.data = []
 
-# Column index mapping based on provided order
-COL_IDX = {
-    "ORDERNUMBER": 0,
-    "QUANTITYORDERED": 1,
-    "PRICEEACH": 2,
-    "ORDERLINENUMBER": 3,
-    "SALES": 4,
-    "ORDERDATE": 5,
-    "PRODUCTLINE": 10,
-}
+# Input form
+with st.form("input_form", clear_on_submit=True):
+    year = st.number_input("Enter Year", min_value=1900, max_value=2100, step=1)
+    sales = st.number_input("Enter Sales ($)", min_value=0.0, format="%.2f")
+    submitted = st.form_submit_button("Add Data")
+    if submitted:
+        st.session_state.data.append({"year": year, "sales": sales})
 
-def load_csv_with_fallback(file):
-    encodings = ['utf-8', 'latin1', 'ISO-8859-1', 'cp1252']
-    for enc in encodings:
-        try:
-            return pd.read_csv(file, encoding=enc)
-        except:
-            continue
-    raise UnicodeDecodeError("Could not decode the CSV file.")
+# Show current input
+if st.session_state.data:
+    df = pd.DataFrame(st.session_state.data).sort_values("year")
+    st.write("### Current Input Data")
+    st.dataframe(df)
 
-if uploaded_file:
-    try:
-        df = load_csv_with_fallback(uploaded_file)
-        st.success("✅ File uploaded successfully!")
-    except Exception as e:
-        st.error(f"❌ Failed to read CSV file: {e}")
-        st.stop()
+    # Plot the raw data
+    fig_raw = go.Figure()
+    fig_raw.add_trace(go.Scatter(x=df['year'], y=df['sales'], mode='lines+markers', name='Actual Sales'))
+    fig_raw.update_layout(title="Sales Over Years", xaxis_title="Year", yaxis_title="Sales ($)")
+    st.plotly_chart(fig_raw, use_container_width=True)
 
-    # Drop fully empty rows
-    df.dropna(how='all', inplace=True)
+    if st.button("✅ Finish Input Data & Run Prediction"):
+        # Prepare features
+        X = df[['year']]
+        y = df['sales']
 
-    # Check if the DataFrame has enough columns
-    if df.shape[1] <= max(COL_IDX.values()):
-        st.error("❌ The uploaded file does not contain all required columns.")
-        st.stop()
+        # Generate future years (next 3 years)
+        last_year = df['year'].max()
+        future_years = pd.DataFrame({'year': np.arange(last_year + 1, last_year + 4)})
 
-    # Convert ORDERDATE (index 5) to datetime
-    try:
-        orderdate_col = df.columns[COL_IDX["ORDERDATE"]]
-        df[orderdate_col] = pd.to_datetime(df[orderdate_col], errors='coerce')
-    except Exception as e:
-        st.warning(f"⚠️ Failed to convert ORDERDATE: {e}")
+        # Machine learning models
+        models = {
+            "Linear Regression": LinearRegression(),
+            "Decision Tree": DecisionTreeRegressor(),
+            "Random Forest": RandomForestRegressor(),
+            "Gradient Boosting": GradientBoostingRegressor(),
+            "Support Vector Regressor": SVR()
+        }
 
-    # Fill missing values
-    num_cols = df.select_dtypes(include='number').columns
-    obj_cols = df.select_dtypes(include='object').columns
-    df[num_cols] = df[num_cols].fillna(0)
-    df[obj_cols] = df[obj_cols].fillna("Unknown")
+        for name, model in models.items():
+            model.fit(X, y)
+            pred_existing = model.predict(X)
+            pred_future = model.predict(future_years)
 
-    # Missing value report
-    with st.expander("🩹 Missing Values Summary"):
-        missing = df.isnull().sum()
-        missing = missing[missing > 0]
-        if not missing.empty:
-            st.dataframe(missing.to_frame(name="Missing Values"))
-        else:
-            st.write("✅ No missing values detected (after handling).")
+            # Combine data for plotting
+            plot_years = pd.concat([X, future_years])
+            plot_sales = np.concatenate([pred_existing, pred_future])
+            labels = ['Historical'] * len(X) + ['Prediction'] * len(future_years)
 
-    # ===== Sales Trend Over Time =====
-    st.subheader("📈 Sales Trend Over Time")
-    try:
-        sales_col = df.columns[COL_IDX["SALES"]]
-        date_col = df.columns[COL_IDX["ORDERDATE"]]
-        time_df = df[[date_col, sales_col]].dropna().sort_values(date_col)
-        time_df.columns = ['ORDERDATE', 'SALES']
-        fig_time = px.line(time_df, x='ORDERDATE', y='SALES', title="Sales Over Time")
-        st.plotly_chart(fig_time, use_container_width=True)
-    except Exception as e:
-        st.info(f"Could not plot Sales Trend: {e}")
+            plot_df = pd.DataFrame({
+                'Year': plot_years['year'],
+                'Sales': plot_sales,
+                'Type': labels
+            })
 
-    # ===== Sales by Product Line =====
-    st.subheader("📊 Sales by Product Line")
-    try:
-        prod_col = df.columns[COL_IDX["PRODUCTLINE"]]
-        sales_col = df.columns[COL_IDX["SALES"]]
-        prod_df = df[[prod_col, sales_col]].copy()
-        prod_df.columns = ['PRODUCTLINE', 'SALES']
-        grouped = prod_df.groupby('PRODUCTLINE')['SALES'].sum().reset_index()
-        fig_bar = px.bar(grouped, x='PRODUCTLINE', y='SALES', title="Total Sales by Product Line")
-        st.plotly_chart(fig_bar, use_container_width=True)
-    except Exception as e:
-        st.info(f"Could not plot Product Line Sales: {e}")
-
-    # ===== Price vs Quantity Scatter =====
-    st.subheader("🧭 Price vs Quantity")
-    try:
-        qty_col = df.columns[COL_IDX["QUANTITYORDERED"]]
-        price_col = df.columns[COL_IDX["PRICEEACH"]]
-        sales_col = df.columns[COL_IDX["SALES"]]
-        prod_col = df.columns[COL_IDX["PRODUCTLINE"]]
-        scatter_df = df[[qty_col, price_col, sales_col, prod_col]].copy()
-        scatter_df.columns = ['QUANTITYORDERED', 'PRICEEACH', 'SALES', 'PRODUCTLINE']
-        fig_scatter = px.scatter(
-            scatter_df,
-            x='QUANTITYORDERED',
-            y='PRICEEACH',
-            size='SALES',
-            color='PRODUCTLINE',
-            title="Price vs Quantity Ordered"
-        )
-        st.plotly_chart(fig_scatter, use_container_width=True)
-    except Exception as e:
-        st.info(f"Could not plot Price vs Quantity: {e}")
-
-    # ===== Summary Statistics =====
-    with st.expander("📋 Summary Statistics"):
-        if not df.select_dtypes(include='number').empty:
-            st.write("**📐 Numeric Summary**")
-            st.dataframe(df.describe().T)
-        if not df.select_dtypes(include='object').empty:
-            st.write("**🏷️ Categorical Summary**")
-            st.dataframe(df.describe(include='object').T)
-
-    # ===== Raw Data Table =====
-    with st.expander("🧾 Raw Data Table"):
-        st.dataframe(df)
+            # Plot
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=plot_df[plot_df['Type']=='Historical']['Year'],
+                                     y=plot_df[plot_df['Type']=='Historical']['Sales'],
+                                     mode='lines+markers',
+                                     name='Historical'))
+            fig.add_trace(go.Scatter(x=plot_df[plot_df['Type']=='Prediction']['Year'],
+                                     y=plot_df[plot_df['Type']=='Prediction']['Sales'],
+                                     mode='lines+markers',
+                                     name='Prediction',
+                                     line=dict(dash='dash')))
+            fig.update_layout(title=f"{name} - Sales Forecast",
+                              xaxis_title="Year", yaxis_title="Sales ($)")
+            st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("👈 Upload the `sales_data_sample.csv` file to begin exploring.")
+    st.info("Please start inputting data (Year and Sales).")
